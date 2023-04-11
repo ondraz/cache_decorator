@@ -63,5 +63,8 @@ setup(
         "compress_pickle >= 2.0.1",      # For compressed pickles
         "compress_json>=1.0.4",        # For compressed json
         "deflate_dict",         # To save arguments to the json
+        "validate_version_code",
+        "numpy",
+        "pandas"
     ],
 )

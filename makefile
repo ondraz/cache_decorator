@@ -2,10 +2,10 @@
 PYTHON_PATH=""
 
 install:
-	$(PYTHON_PATH)pip install --user --upgrade .
+	$(PYTHON_PATH)pip install --upgrade .
 
 install_test:
-	$(PYTHON_PATH)pip install --user --upgrade ".[test]"
+	$(PYTHON_PATH)pip install --upgrade ".[test]"
 
 test:
 	$(PYTHON_PATH)pytest -s --cov cache_decorator --cov-report html

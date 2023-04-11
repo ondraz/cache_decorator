@@ -60,6 +60,7 @@ class Cache:
         load_kwargs:dict = {},
         enable_cache_arg_name: Optional[str] = None,
         capture_enable_cache_arg_name: bool = True,
+        overwrite_cache_arg_name: Optional[str] = None,
     ):
         """
         Cache the results of a function (or method).
@@ -149,7 +150,7 @@ class Cache:
         log_format: str = '%(asctime)-15s[%(levelname)s]: %(message)s'
             Formatting of the default logger on stderr. Informations on how the formatting works can be found at
             https://docs.python.org/3/library/logging.html . Moreover, as explained in the log_level, you can get
-            a referfence to the logger and fully customize it.
+            a reference to the logger and fully customize it.
         backup_path: str = None,
             If the serialization fails, the decorator will try to save the computed result as a pickle.
             This parameter is the formatter for the path where to save the backup result.
@@ -160,15 +161,15 @@ class Cache:
             of the function. Moreover, there is also another two additional parameters, {_date} which is the date of the backup, and {_rnd} which is a random string that will 
             guarantee that no file has the same name.  
         backup: bool = True,
-            If the cache should backup the result to a .pkl in case of exception during the serializzation.
-            This flag is mainly for debug pourpouses.
+            If the cache should backup the result to a .pkl in case of exception during the serialization.
+            This flag is mainly for debug purposes.
         optional_path_keys: Optional[List[str]] = None
             This argument can be used only if the cache_path is a Dict, otherwise we will raise an
             exception. Otherwise, if the cache_path is a Dict, this is the list of keys that are
             optional to dump and/or load. This is used to cache results with possibly
             missing keys.
         enable_cache_arg_name: Optional[str] = None,
-            This paramer specify the name of a boolean argument that, if given
+            This parameter specifies the name of a boolean argument that, if given
             to the cached function, will enable or disable the caching 
             dynamically. If the argument is not passed the cache will be 
             enabled by default. This argument, if passed, will automatically be
@@ -178,6 +179,14 @@ class Cache:
         capture_enable_cache_arg_name: bool = True,
             If this parameter is set, the cache will capture the enable cache arg
             and NOT pass it to the decorated function.
+        overwrite_cache_arg_name: Optional[str] = None,
+            This parameter specifies the name of a boolean argument that, if given
+            to the cached function, will make the cache to call the function and overwrite
+            the cached value. If the argument is not passed the cached value will be used by default.
+            This argument, if passed, will automatically be
+            added to the `args_to_ignore` so that it doesn't ruin the caching.
+            Currently, this can **only** be a kwarg, in future releases I will
+            implement it also for args.
         """
         self.log_level = log_level
         self.log_format = log_format
@@ -193,8 +202,8 @@ class Cache:
 
         self.load_kwargs, self.dump_kwargs = load_kwargs, dump_kwargs
         self.enable_cache_arg_name = enable_cache_arg_name
-        self. capture_enable_cache_arg_name = capture_enable_cache_arg_name
-
+        self.capture_enable_cache_arg_name = capture_enable_cache_arg_name
+        self.overwrite_cache_arg_name = overwrite_cache_arg_name
         self.optional_path_keys = optional_path_keys
 
         if self.optional_path_keys is None:
@@ -371,7 +380,7 @@ class Cache:
         if self.enable_cache_arg_name is None:
             return True, args, kwargs
 
-        # if the arg is in the kwargs, ez, pop the value and retrun
+        # if the arg is in the kwargs, ez, pop the value and return
         if self.enable_cache_arg_name in kwargs:
             if self.capture_enable_cache_arg_name:
                 cache_enabled = kwargs.pop(self.enable_cache_arg_name, True)
@@ -415,6 +424,52 @@ class Cache:
 
         return root, args, kwargs
 
+    def _is_overwrite_cache(self, args, kwargs, inner_self = None):
+        # if overwrite_cache_arg_name is not defined, then forward
+        if self.overwrite_cache_arg_name is None:
+            return False, args, kwargs
+
+        # if the arg is in the kwargs, ez, pop the value and return
+        if self.overwrite_cache_arg_name in kwargs:
+            cache_enabled = kwargs.pop(self.overwrite_cache_arg_name, False)
+            return cache_enabled, args, kwargs
+
+        # Normalize args and kwargs
+        params = get_params(self.function_info, args, kwargs)
+
+        # TODO!: implement this
+        # # if it was in the args, we need to remove it from there 
+        # if self.overwrite_cache_arg_name in params:
+        #     cache_enabled = kwargs.pop(self.overwrite_cache_arg_name, True)
+        #     return cache_enabled, args, kwargs
+
+        # Add the self if we are in a method
+        if inner_self is not None:
+            params["self"] = inner_self
+
+        # otherwise it's either an attribute or method call we should resolve
+
+        # Get the name of the base element and the attributes chain
+        root, *attrs = self.overwrite_cache_arg_name.strip("()").split(".")
+
+        # This means that the parameter was setted but the arg wasn't passed
+        # so we should default to true
+        if root not in params:
+            return True, args, kwargs
+
+        # Get the params to use for the attributes chain
+        root = params[root]
+        
+        # Follow the attributes chain
+        for attr in attrs:                    
+            root = getattr(root, attr)
+
+        # Check if we have to call the function or not
+        if inspect.isfunction(root) or inspect.ismethod(root) or inspect.isbuiltin(root):
+            root = root()
+
+        return root, args, kwargs
+    
     def _load(self, path):
 
         # Check if it's a structured path
@@ -593,6 +648,7 @@ class Cache:
         @wraps(function)
         def wrapped(*args, **kwargs):
             cache_enabled, args, kwargs = self._is_cache_enabled(args, kwargs)
+            overwrite_cache, args, kwargs = self._is_overwrite_cache(args, kwargs)
             
             # if the cache is not enabled just forward the call
             if not cache_enabled:
@@ -604,11 +660,12 @@ class Cache:
             # Get the path
             path = self._get_formatted_path(args, kwargs)
 
-            # Try to load the cache
-            result = self._load(path)
-            # if we got a result, reutrn it
-            if result is not None:
-                return result
+            if not overwrite_cache:
+                # Try to load the cache
+                result = self._load(path)
+                # if we got a result, reutrn it
+                if result is not None:
+                    return result
             
             self.logger.info("Computing the result for %s %s", args, kwargs)
             # otherwise compute the result
@@ -638,6 +695,7 @@ class Cache:
         @wraps(function)
         def wrapped(self, *args, **kwargs):
             cache_enabled, args, kwargs = self._is_cache_enabled(args, kwargs, inner_self=self)
+            overwrite_cache, args, kwargs = self._is_overwrite_cache(args, kwargs)
             
             # if the cache is not enabled just forward the call
             if not cache_enabled:
@@ -653,11 +711,12 @@ class Cache:
             if not issubclass(self, Hashable):
                 raise ValueError("Could not has self of class `{}` because it doesn't implement Hashable (from dict_hash).".format(self.__class__.__name__))
 
-            # Try to load the cache
-            result = self._load(path)
-            # if we got a result, reutrn it
-            if result is not None:
-                return result
+            if not overwrite_cache:
+                # Try to load the cache
+                result = self._load(path)
+                # if we got a result, reutrn it
+                if result is not None:
+                    return result
             
             self.logger.info("Computing the result for %s %s", args, kwargs)
             # otherwise compute the result
