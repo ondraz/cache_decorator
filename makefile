@@ -20,3 +20,7 @@ pytest:
 	rm -rfd test_cache
 	pytest -s
 	rm -rfd test_cache
+
+publish_codeartifact: build
+	aws codeartifact login --tool twine --repository upheal --domain upheal --domain-owner 746959089469 --region eu-central-1
+	twine upload --repository codeartifact ./dist/*
