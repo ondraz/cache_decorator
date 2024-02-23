@@ -1,5 +1,6 @@
 
 PYTHON_PATH=""
+.PHONY: install install_test test build publish pytest publish_codeartifact
 
 install:
 	$(PYTHON_PATH)pip install --upgrade .
