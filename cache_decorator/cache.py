@@ -770,8 +770,10 @@ class Cache:
         groups_set = {match.str_match for match in groups}
 
         if "_hash" in groups_set:
-            data = {"params": params, "function_info": function_info}
+            data_params = params.copy()
+            data = {"params": data_params, "function_info": function_info}
 
+            data["params"].pop("self", None)
             if inner_self is not None: 
                 data["self"] = inner_self
 
